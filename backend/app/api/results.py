@@ -1,0 +1,135 @@
+"""
+GET /results — paginated trace list with eval summaries.
+GET /results/{trace_id} — full trace + all eval results.
+GET /results/stats — pass rate time series for dashboard charts.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.database import get_db
+from app.models import EvalResult as DbEvalResult
+from app.models import Trace as DbTrace
+
+router = APIRouter(prefix="/results", tags=["results"])
+
+
+@router.get("/stats")
+async def get_stats(
+    contract_id: str = Query(..., description="Contract ID to get stats for"),
+    days: int = Query(7, ge=1, le=90, description="Number of days of history"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Returns daily pass rate time series for a specific contract.
+    Used by the React dashboard to render line charts.
+    """
+    since = datetime.now(tz=timezone.utc) - timedelta(days=days)
+
+    rows = (
+        await db.execute(
+            select(
+                func.date_trunc("day", DbEvalResult.evaluated_at).label("day"),
+                func.count().label("total"),
+                func.sum(func.cast(DbEvalResult.passed, type_=None)).label("passed"),
+            )
+            .where(
+                and_(
+                    DbEvalResult.contract_id == contract_id,
+                    DbEvalResult.evaluated_at >= since,
+                )
+            )
+            .group_by("day")
+            .order_by("day")
+        )
+    ).all()
+
+    series = [
+        {
+            "date": row.day.date().isoformat() if row.day else None,
+            "total": row.total,
+            "passed": int(row.passed or 0),
+            "pass_rate": round(int(row.passed or 0) / row.total * 100, 1) if row.total else None,
+        }
+        for row in rows
+    ]
+
+    return {"contract_id": contract_id, "days": days, "series": series}
+
+
+@router.get("/{trace_id}")
+async def get_trace_detail(
+    trace_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Full trace detail with all eval results and reasoning traces."""
+    import uuid as _uuid
+
+    try:
+        uid = _uuid.UUID(trace_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid trace_id format")
+
+    trace = (
+        await db.execute(
+            select(DbTrace)
+            .options(selectinload(DbTrace.eval_results))
+            .where(DbTrace.id == uid)
+        )
+    ).scalar_one_or_none()
+
+    if trace is None:
+        raise HTTPException(status_code=404, detail="Trace not found")
+
+    return {
+        "trace": trace.to_dict(),
+        "eval_results": [r.to_dict() for r in trace.eval_results],
+        "summary": {
+            "total_contracts": len(trace.eval_results),
+            "passed": sum(1 for r in trace.eval_results if r.passed),
+            "failed": sum(1 for r in trace.eval_results if not r.passed),
+        },
+    }
+
+
+@router.get("")
+async def list_results(
+    pipeline_id: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Paginated list of traces with pass/fail summary per trace."""
+    q = select(DbTrace).options(selectinload(DbTrace.eval_results)).order_by(
+        DbTrace.created_at.desc()
+    )
+    if pipeline_id:
+        q = q.where(DbTrace.pipeline_id == pipeline_id)
+
+    traces = (await db.execute(q.limit(limit).offset(offset))).scalars().all()
+
+    count_q = select(func.count()).select_from(DbTrace)
+    if pipeline_id:
+        count_q = count_q.where(DbTrace.pipeline_id == pipeline_id)
+    total = (await db.execute(count_q)).scalar_one()
+
+    items = []
+    for t in traces:
+        evals = t.eval_results
+        items.append({
+            **t.to_dict(),
+            "eval_summary": {
+                "total": len(evals),
+                "passed": sum(1 for r in evals if r.passed),
+                "failed": sum(1 for r in evals if not r.passed),
+                "violations": [r.contract_id for r in evals if not r.passed],
+            },
+        })
+
+    return {"total": total, "limit": limit, "offset": offset, "items": items}

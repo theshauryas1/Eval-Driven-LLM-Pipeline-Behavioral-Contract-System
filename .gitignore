@@ -1,0 +1,50 @@
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+venv/
+.venv/
+env/
+.env
+!.env.example
+
+# ── Database ─────────────────────────────────────────────────
+*.db
+*.sqlite3
+dev.db
+
+# ── Node / Frontend ───────────────────────────────────────────
+node_modules/
+dist/
+.vite/
+*.local
+
+# ── Secrets ───────────────────────────────────────────────────
+.env
+*.pem
+*.key
+
+# ── OS / IDE ──────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.suo
+*.swp
+
+# ── Test / Coverage ───────────────────────────────────────────
+.pytest_cache/
+htmlcov/
+.coverage
+*.log
+
+# ── FAISS index files ─────────────────────────────────────────
+*.faiss
+*.pkl

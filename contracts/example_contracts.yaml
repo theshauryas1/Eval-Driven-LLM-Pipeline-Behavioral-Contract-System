@@ -1,0 +1,31 @@
+contracts:
+  - id: always_cite_source
+    type: structural
+    description: Response must reference at least one retrieved chunk
+    config:
+      min_citations: 1
+
+  - id: response_not_empty
+    type: structural
+    description: Response must be at least 20 characters long
+    config:
+      min_length: 20
+
+  - id: no_pii_email
+    type: pattern
+    description: Response must not contain email addresses
+    config:
+      pattern: '[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}'
+      must_not_match: true
+
+  - id: no_pii_phone
+    type: pattern
+    description: Response must not contain phone numbers
+    config:
+      pattern: '(\+?\d[\d\s\-().]{7,}\d)'
+      must_not_match: true
+
+  - id: context_faithfulness
+    type: semantic
+    description: Claims in response must be grounded in retrieved context
+    config: {}
