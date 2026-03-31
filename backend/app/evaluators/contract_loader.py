@@ -29,12 +29,17 @@ class Contract(BaseModel):
 def load_contracts(yaml_path: str | Path | None = None) -> list[Contract]:
     """Load contracts from YAML file. Falls back to env var CONTRACTS_YAML_PATH."""
     if yaml_path is None:
-        yaml_path = os.getenv(
-            "CONTRACTS_YAML_PATH",
-            str(Path(__file__).parents[3] / "contracts" / "example_contracts.yaml"),
-        )
+        yaml_path = os.getenv("CONTRACTS_YAML_PATH", "contracts/example_contracts.yaml")
 
     path = Path(yaml_path)
+    if not path.is_absolute():
+        candidate_paths = [
+            Path.cwd() / path,
+            Path(__file__).parents[2] / path,
+            Path(__file__).parents[3] / path,
+        ]
+        path = next((candidate for candidate in candidate_paths if candidate.exists()), candidate_paths[1])
+
     if not path.exists():
         raise FileNotFoundError(f"Contracts YAML not found at: {path}")
 

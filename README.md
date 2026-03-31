@@ -155,6 +155,39 @@ Run `demo/inject_failures.py` to fire each contract:
 
 **Total monthly cost: $0**
 
+### Deploy backend on Railway
+
+1. Create a Neon Postgres database and copy the connection string.
+2. Create a Groq API key.
+3. In Railway, create a new project from this GitHub repo.
+4. Set the Railway service root directory to `backend/`.
+5. Add these environment variables in Railway:
+
+```bash
+DATABASE_URL=postgresql+asyncpg://...
+GROQ_API_KEY=gsk_...
+CONTRACTS_YAML_PATH=contracts/example_contracts.yaml
+CORS_ORIGIN=https://your-frontend-domain.vercel.app
+```
+
+6. Railway will start the API with `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+7. After deploy, verify `https://your-backend-domain.up.railway.app/health`.
+
+### Deploy frontend on Vercel
+
+1. Create a new Vercel project from the same GitHub repo.
+2. Set the Vercel root directory to `frontend/`.
+3. Add this environment variable in Vercel:
+
+```bash
+VITE_API_URL=https://your-backend-domain.up.railway.app
+```
+
+4. Deploy the app and open the generated Vercel URL.
+5. Update Railway `CORS_ORIGIN` to that exact Vercel production URL if needed.
+
+`frontend/vercel.json` is included so React Router routes like `/traces` and `/regression` work on refresh.
+
 ## Project Structure
 
 ```
