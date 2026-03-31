@@ -1,0 +1,39 @@
+{
+  "suite_name": "reasoning_tests",
+  "description": "Reasoning and hallucination detection.",
+  "prompt": {
+    "id": "grounded_reasoner",
+    "version": "v1",
+    "template": "Use the context to answer. If the answer is not in the context, say you do not know.\nQuestion: {input}\nContext: {context}\nAnswer:"
+  },
+  "tests": [
+    {
+      "test_name": "grounded_tower_answer",
+      "input": "Where is the Eiffel Tower located?",
+      "context": "The Eiffel Tower is located in Paris, France.",
+      "expected": {
+        "type": "contains",
+        "value": "Paris"
+      },
+      "constraints": [
+        {
+          "type": "no_hallucination"
+        }
+      ]
+    },
+    {
+      "test_name": "unknown_when_missing",
+      "input": "What year was the Eiffel Tower moved to London?",
+      "context": "The Eiffel Tower is located in Paris, France.",
+      "expected": {
+        "type": "contains",
+        "value": "do not know"
+      },
+      "constraints": [
+        {
+          "type": "no_hallucination"
+        }
+      ]
+    }
+  ]
+}

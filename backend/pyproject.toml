@@ -1,0 +1,8 @@
+[project]
+name = "llm-contracts"
+version = "0.2.0"
+description = "Contract-based LLM testing, comparison, and prompt repair CLI"
+requires-python = ">=3.10"
+
+[project.scripts]
+llmtest = "app.cli:main"

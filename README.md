@@ -1,239 +1,215 @@
 # Eval-Driven LLM Pipeline Behavioral Contract System
 
-A deployable system where teams **define what their LLM pipeline must always do** and the system automatically detects when it stops doing that — with a live dashboard showing the history of violations.
+Define tests for LLM outputs, run them at scale, detect failures, and auto-improve prompts.
 
-[![Backend](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat&logo=fastapi)](https://fastapi.tiangolo.com)
-[![LangGraph](https://img.shields.io/badge/Eval%20Agent-LangGraph-7C3AED?style=flat)](https://www.langchain.com/langgraph)
-[![Frontend](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61DAFB?style=flat&logo=react)](https://vitejs.dev)
-[![Database](https://img.shields.io/badge/DB-Neon%20Postgres-00E5CC?style=flat)](https://neon.tech)
-[![LLM](https://img.shields.io/badge/LLM-Groq%20Llama%203.3%2070B-orange?style=flat)](https://console.groq.com)
+This repo now has two complementary product surfaces:
 
----
+- `llmtest` CLI for contract-style suites, model comparison, failure analysis, reporting, and prompt repair
+- FastAPI + React dashboard for trace ingestion, contract monitoring, and inspection
 
-## Architecture
+## Product Promise
 
-```
-Frontend (React/Vite → Vercel)
-        │ REST API
-        ▼
-Backend (FastAPI → Railway)
-   ├── POST /trace        ← receives LLM pipeline traces
-   ├── GET  /contracts    ← lists active contracts + pass rates
-   └── GET  /results      ← paginated traces + eval details
-        │
-        ▼
-Contract Evaluator Engine
-   ├── Structural  — deterministic rule checks (citations, length)
-   ├── Pattern     — regex checks (PII: email, phone)
-   └── Semantic    — LangGraph 3-step faithfulness judge
-                       extract_claims → match_to_context → flag_contradictions
-                       (Groq / Llama 3.3 70B)
-        │
-        ▼
-Neon Postgres (traces · contracts · eval_results)
-```
+The core workflow is:
 
-## Contract YAML Format
+1. Define behavioral tests for an LLM output.
+2. Run those tests across one or more models or configs.
+3. Diagnose failures with typed reasons instead of plain pass/fail.
+4. Auto-rewrite prompts, retry, and compare whether behavior improved.
 
-Define behavioral specs any non-engineer can read:
+That positions the project as a testing and validation framework for LLM pipelines with contract-based constraints, failure diagnostics, and automated prompt optimization.
 
-```yaml
-contracts:
-  - id: always_cite_source
-    type: structural
-    description: Response must reference at least one retrieved chunk
-    config:
-      min_citations: 1
+## Core Architecture
 
-  - id: no_pii_email
-    type: pattern
-    description: Response must not contain email addresses
-    config:
-      pattern: '[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}'
-      must_not_match: true
+### Layer 1 - Test Definition
 
-  - id: context_faithfulness
-    type: semantic
-    description: Claims in response must be grounded in retrieved context
+Suites live in JSON and describe:
+
+- `input`
+- `context`
+- `expected`
+- `constraints`
+- `prompt` with version metadata
+
+Example:
+
+```json
+{
+  "suite_name": "qa_tests",
+  "prompt": {
+    "id": "rag_answerer",
+    "version": "v1",
+    "template": "Answer the question using only the provided context.\nQuestion: {input}\nContext: {context}\nAnswer:"
+  },
+  "tests": [
+    {
+      "test_name": "qa_correctness",
+      "input": "What is the capital of France?",
+      "context": "Paris is the capital of France.",
+      "expected": { "type": "contains", "value": "Paris" },
+      "constraints": [
+        { "type": "max_length", "value": 50 },
+        { "type": "no_hallucination" }
+      ]
+    }
+  ]
+}
 ```
 
-Three contract types:
-| Type | How it works | Speed |
-|------|-------------|-------|
-| `structural` | Deterministic rules (citation count, min length) | < 1ms |
-| `pattern` | Compiled regex (PII, format enforcement) | < 1ms |
-| `semantic` | LangGraph agent — 3-step LLM judge via Groq | ~2–5s |
+### Layer 2 - Execution Engine
+
+`llmtest run` and `llmtest compare` execute the same suite across multiple model adapters.
+
+Included adapters:
+
+- `mock`
+- `echo`
+- `openai_compatible`
+
+### Layer 3 - Evaluation Engine
+
+Checks are split into reusable evaluators:
+
+- correctness via `expected`
+- format via regex and citation checks
+- length via min/max limits
+- safety via PII guards
+- hallucination via semantic faithfulness evaluation
+
+### Layer 4 - Failure Analysis
+
+Failures return structured objects such as:
+
+```json
+{
+  "status": "fail",
+  "failure_type": "hallucination",
+  "reason": "1 unsupported claim(s) detected.",
+  "confidence": 0.88,
+  "evaluator": "constraint.hallucination"
+}
+```
+
+### Layer 5 - Auto-Repair
+
+`llmtest fix` analyzes failing tests, appends targeted repair instructions to the prompt, retries the baseline model, and writes improved prompt versions under `.llmtest/fixes/`.
+
+## CLI Commands
+
+From `backend/`:
+
+```bash
+pip install -r requirements.txt
+pip install -e .
+```
+
+Then run:
+
+```bash
+llmtest run ../tests
+llmtest compare ../tests
+llmtest report
+llmtest fix ../tests --model mistral-mock
+```
+
+Artifacts are stored under `.llmtest/`:
+
+- `reports/latest.json`
+- `reports/<run_id>.json`
+- `prompt_versions.json`
+- `fixes/*.json`
+
+## Built-In Constraint Types
+
+- `max_length`
+- `min_length`
+- `contains_citation`
+- `no_hallucination`
+- `no_pii_email`
+- `no_pii_phone`
+- `regex`
+- `custom`
+
+`custom` constraints support a plugin-style callable target in `config.callable`.
+
+## Sample Suites
+
+The repo ships with:
+
+- [`tests/qa_tests.json`](/c:/Eval-Driven%20LLM%20Pipeline%20Behavioral%20Contract%20System/llm-contracts/tests/qa_tests.json)
+- [`tests/safety_tests.json`](/c:/Eval-Driven%20LLM%20Pipeline%20Behavioral%20Contract%20System/llm-contracts/tests/safety_tests.json)
+- [`tests/reasoning_tests.json`](/c:/Eval-Driven%20LLM%20Pipeline%20Behavioral%20Contract%20System/llm-contracts/tests/reasoning_tests.json)
+- [`tests/models.json`](/c:/Eval-Driven%20LLM%20Pipeline%20Behavioral%20Contract%20System/llm-contracts/tests/models.json)
+
+These demonstrate:
+
+- test suites like `pytest` for LLM outputs
+- model comparison with pass rates, failure breakdown, and latency
+- prompt version tracking
+- repairable prompt retries
+
+## Backend and Dashboard
+
+The original API and frontend are still present:
+
+- FastAPI backend in [`backend/app/main.py`](/c:/Eval-Driven%20LLM%20Pipeline%20Behavioral%20Contract%20System/llm-contracts/backend/app/main.py)
+- React dashboard in [`frontend/src/pages/Dashboard.jsx`](/c:/Eval-Driven%20LLM%20Pipeline%20Behavioral%20Contract%20System/llm-contracts/frontend/src/pages/Dashboard.jsx)
+
+API endpoints:
+
+- `POST /trace`
+- `GET /contracts`
+- `GET /results`
+- `GET /results/{trace_id}`
+- `GET /results/stats`
+
+The semantic evaluator now includes a deterministic fallback when no Groq key is available, so hallucination checks remain useful in local test runs.
 
 ## Quick Start
 
-### 1. Clone & set up environment
-
-```bash
-git clone https://github.com/theshauryas1/Eval-Driven-LLM-Pipeline-Behavioral-Contract-System.git
-cd Eval-Driven-LLM-Pipeline-Behavioral-Contract-System
-
-# Copy and fill in env vars
-cp backend/.env.example backend/.env
-# Edit backend/.env with your GROQ_API_KEY and DATABASE_URL (Neon)
-```
-
-### 2. Run the backend
+### Backend API
 
 ```bash
 cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --reload
-# → http://localhost:8000
-# → http://localhost:8000/docs  (Swagger UI)
 ```
 
-### 3. Run the dashboard
+### Frontend Dashboard
 
 ```bash
 cd frontend
 npm install
 npm run dev
-# → http://localhost:5173
 ```
 
-### 4. Run the demo
+### Demo Trace Pipeline
 
 ```bash
 cd demo
 pip install -r requirements.txt
 python run_demo.py
-# Sends 3 normal queries + 3 deliberate failures to the contract system
-# Watch violations appear on the dashboard in real time
 ```
 
-### 5. Run unit tests
+### Tests
 
 ```bash
 cd backend
-pytest tests/ -v
-# 25+ unit tests across all 3 evaluator types
-```
-
-## The Semantic Faithfulness Agent (Week 3)
-
-The differentiator of this project is the **LangGraph 3-step reasoning agent** that judges whether LLM responses are grounded in retrieved context:
-
-```
-Node 1 — extract_claims
-  "List every factual claim in this response, one per line."
-         ↓
-Node 2 — match_to_context
-  "For each claim, find the best matching sentence in context.
-   Rate similarity: high / medium / low / none."
-         ↓
-Node 3 — flag_contradictions
-  "For each unsupported claim, explain why it is hallucinated."
-         ↓
-Output: { passed: bool, violations: [...], explanation: "..." }
-```
-
-Every step's output is stored as a JSON reasoning trace in Postgres and rendered inline in the Trace Inspector on the dashboard.
-
-## Demo: 3 Deliberate Failures
-
-Run `demo/inject_failures.py` to fire each contract:
-
-| Failure | What happens | Contract fired |
-|---------|-------------|----------------|
-| PII Leak | Email appended to response | `no_pii_email` |
-| Missing Citation | `[Source:...]` stripped | `always_cite_source` |
-| Hallucination | Eiffel Tower → "London, 1754" | `context_faithfulness` |
-
-## Deployment
-
-| Component | Platform | Cost |
-|-----------|----------|------|
-| FastAPI backend | Railway | $0 (free $5/mo credit) |
-| React dashboard | Vercel | $0 (free) |
-| Postgres | Neon | $0 (free tier, 0.5GB) |
-| LLM judge | Groq API | $0 (free tier) |
-
-**Total monthly cost: $0**
-
-### Deploy backend on Railway
-
-1. Create a Neon Postgres database and copy the connection string.
-2. Create a Groq API key.
-3. In Railway, create a new project from this GitHub repo.
-4. Set the Railway service root directory to `backend/`.
-5. Add these environment variables in Railway:
-
-```bash
-DATABASE_URL=postgresql+asyncpg://...
-GROQ_API_KEY=gsk_...
-CONTRACTS_YAML_PATH=contracts/example_contracts.yaml
-CORS_ORIGIN=https://your-frontend-domain.vercel.app
-```
-
-6. Railway will start the API with `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
-7. After deploy, verify `https://your-backend-domain.up.railway.app/health`.
-
-### Deploy frontend on Vercel
-
-1. Create a new Vercel project from the same GitHub repo.
-2. Set the Vercel root directory to `frontend/`.
-3. Add this environment variable in Vercel:
-
-```bash
-VITE_API_URL=https://your-backend-domain.up.railway.app
-```
-
-4. Deploy the app and open the generated Vercel URL.
-5. Update Railway `CORS_ORIGIN` to that exact Vercel production URL if needed.
-
-`frontend/vercel.json` is included so React Router routes like `/traces` and `/regression` work on refresh.
-
-## Project Structure
-
-```
-├── contracts/
-│   └── example_contracts.yaml      # Contract definitions
-├── backend/
-│   ├── app/
-│   │   ├── main.py                 # FastAPI entrypoint
-│   │   ├── models.py               # SQLAlchemy ORM (traces, contracts, eval_results)
-│   │   ├── database.py             # Async Postgres/SQLite connection
-│   │   ├── api/
-│   │   │   ├── traces.py           # POST /trace
-│   │   │   ├── contracts.py        # GET /contracts
-│   │   │   └── results.py          # GET /results, /results/{id}, /results/stats
-│   │   └── evaluators/
-│   │       ├── engine.py           # Orchestrates all evaluators
-│   │       ├── contract_loader.py  # YAML parser + Pydantic validation
-│   │       ├── structural.py       # Deterministic structural checks
-│   │       ├── pattern.py          # Regex PII/format checks
-│   │       └── semantic.py         # LangGraph 3-step faithfulness judge
-│   ├── tests/                      # 25+ unit tests
-│   └── requirements.txt
-├── frontend/
-│   └── src/
-│       ├── pages/
-│       │   ├── Dashboard.jsx       # Contract cards + sparklines
-│       │   ├── TracesPage.jsx      # Trace list + inspector modal
-│       │   └── RegressionPage.jsx  # Pass-rate line charts
-│       └── components/
-│           └── Sidebar.jsx
-└── demo/
-    ├── rag_pipeline.py             # Instrumented LangChain RAG app
-    ├── inject_failures.py          # 3 deliberate failure modes
-    └── run_demo.py                 # Full demo orchestrator
+pytest tests -v
 ```
 
 ## Tech Stack
 
-- **FastAPI** — async Python backend with BackgroundTasks for non-blocking eval
-- **SQLAlchemy (async) + asyncpg** — Postgres ORM, falls back to SQLite for local dev
-- **LangGraph** — multi-step agent graph for semantic evaluation
-- **Groq / Llama 3.3 70B** — fast free LLM inference for the faithfulness judge
-- **React + Vite + Recharts** — dashboard with live charts and trace inspector
-- **Neon** — serverless Postgres with no spin-down on free tier
+- FastAPI
+- SQLAlchemy async + Postgres/SQLite
+- LangGraph + Groq for semantic judging when configured
+- React + Vite
+- JSON suite runner with local artifact storage
 
----
+## Why This Is Different
 
-> Built as a portfolio project demonstrating eval-driven LLM engineering.
-> The LangGraph semantic agent is the technical differentiator — every interview walkthrough starts there.
+This project is not just "evaluate outputs." The differentiator is behavioral contracts plus auto-repair:
+
+- define what must hold
+- detect exactly how behavior failed
+- tighten the prompt automatically
+- re-run and measure whether quality improved

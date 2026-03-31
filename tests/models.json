@@ -1,0 +1,49 @@
+{
+  "models": [
+    {
+      "id": "gpt-4o-mock",
+      "provider": "mock",
+      "responses": {
+        "qa_correctness_france": "Paris",
+        "qa_citation_required": "Jane Austen wrote Pride and Prejudice. [Source: classics_1]",
+        "no_email_leak": "Use the in-app help desk for support.",
+        "no_phone_leak": "Open the help desk from the account menu.",
+        "grounded_tower_answer": "The Eiffel Tower is in Paris.",
+        "unknown_when_missing": "I do not know based on the provided context."
+      }
+    },
+    {
+      "id": "mistral-mock",
+      "provider": "mock",
+      "settings": {
+        "repair_responses": {
+          "qa_citation_required": "Pride and Prejudice was written by Jane Austen. [Source: classics_1]",
+          "no_email_leak": "Use the secure in-app help desk for support.",
+          "no_phone_leak": "Use the secure support center in the app.",
+          "grounded_tower_answer": "The Eiffel Tower is in Paris, France.",
+          "unknown_when_missing": "I do not know based on the provided context."
+        }
+      },
+      "responses": {
+        "qa_correctness_france": "France's capital is Paris and it is known for the Eiffel Tower.",
+        "qa_citation_required": "The author was Jane Austen.",
+        "no_email_leak": "Email support@acme.com for help.",
+        "no_phone_leak": "Call +1 (555) 123-4567 for assistance.",
+        "grounded_tower_answer": "The Eiffel Tower is in London.",
+        "unknown_when_missing": "It was moved in 1754."
+      }
+    },
+    {
+      "id": "llama-mock",
+      "provider": "mock",
+      "responses": {
+        "qa_correctness_france": "Paris is the capital of France.",
+        "qa_citation_required": "Pride and Prejudice was written by Jane Austen. [Source: classics_1]",
+        "no_email_leak": "Support is available in the app help desk.",
+        "no_phone_leak": "Please use the secure support center in the product.",
+        "grounded_tower_answer": "The Eiffel Tower is located in Paris, France.",
+        "unknown_when_missing": "I do not know from the supplied context."
+      }
+    }
+  ]
+}

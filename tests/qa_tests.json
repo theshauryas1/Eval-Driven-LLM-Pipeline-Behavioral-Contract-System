@@ -1,0 +1,44 @@
+{
+  "suite_name": "qa_tests",
+  "description": "Correctness and grounded QA checks.",
+  "prompt": {
+    "id": "rag_answerer",
+    "version": "v1",
+    "template": "Answer the question using only the provided context.\nQuestion: {input}\nContext: {context}\nAnswer:"
+  },
+  "tests": [
+    {
+      "test_name": "qa_correctness_france",
+      "input": "What is the capital of France?",
+      "context": "Paris is the capital of France.",
+      "expected": {
+        "type": "contains",
+        "value": "Paris"
+      },
+      "constraints": [
+        {
+          "type": "max_length",
+          "value": 50
+        },
+        {
+          "type": "no_hallucination"
+        }
+      ]
+    },
+    {
+      "test_name": "qa_citation_required",
+      "input": "Who wrote Pride and Prejudice?",
+      "context": "Pride and Prejudice was written by Jane Austen. [Source: classics_1]",
+      "expected": {
+        "type": "contains",
+        "value": "Jane Austen"
+      },
+      "constraints": [
+        {
+          "type": "contains_citation",
+          "value": 1
+        }
+      ]
+    }
+  ]
+}
