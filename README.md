@@ -1,11 +1,23 @@
 # Eval-Driven LLM Pipeline Behavioral Contract System
 
-Define tests for LLM outputs, run them at scale, detect failures, and auto-improve prompts.
+Evaluation-driven LLM quality platform for testing outputs, detecting hallucinations and policy violations, and tracking regressions over time.
 
-This repo now has two complementary product surfaces:
+## What It Does
 
-- `llmtest` CLI for contract-style suites, model comparison, failure analysis, reporting, and prompt repair
-- FastAPI + React dashboard for trace ingestion, contract monitoring, and inspection
+This project gives you two product surfaces:
+
+- a contract-based `llmtest` CLI for running repeatable LLM evaluation suites
+- a FastAPI + React dashboard for trace ingestion, live inspection, and contract monitoring
+
+## Why It Matters
+
+Most LLM apps fail silently. This system makes failures explicit by checking every output against behavioral contracts such as citation requirements, PII leakage, and context faithfulness.
+
+## Demo
+
+- API demo endpoint: `POST /trace/demo`
+- Frontend dashboard: deploy the Vite app and point `VITE_API_URL` at the backend
+- Suggested live flow: run the demo endpoint, then open the Trace Inspector to show the failed contracts and reasoning trace
 
 ## Product Promise
 
@@ -157,12 +169,20 @@ The original API and frontend are still present:
 API endpoints:
 
 - `POST /trace`
+- `POST /trace/demo`
 - `GET /contracts`
 - `GET /results`
 - `GET /results/{trace_id}`
 - `GET /results/stats`
 
-The semantic evaluator now includes a deterministic fallback when no Groq key is available, so hallucination checks remain useful in local test runs.
+The semantic evaluator includes:
+
+- deterministic fallback when no Groq key is available
+- retry handling for Groq rate limits
+- bounded in-process concurrency for burst control
+- in-memory prompt-response caching for repeated semantic checks
+
+The trace ingestion endpoints also include a simple in-memory per-IP rate limiter for demo deployments.
 
 ## Quick Start
 
@@ -172,6 +192,14 @@ The semantic evaluator now includes a deterministic fallback when no Groq key is
 cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --reload
+```
+
+Instant demo:
+
+```bash
+curl -X POST http://127.0.0.1:8000/trace/demo ^
+  -H "Content-Type: application/json" ^
+  -d "{\"scenario\":\"hallucination\"}"
 ```
 
 ### Frontend Dashboard
@@ -196,6 +224,52 @@ python run_demo.py
 cd backend
 pytest tests -v
 ```
+
+## Deployment
+
+### Railway Backend
+
+The repo already includes Railway config in [backend/railway.json](/c:/Eval-Driven%20LLM%20Pipeline%20Behavioral%20Contract%20System/llm-contracts/backend/railway.json).
+
+Use these settings:
+
+```bash
+Root Directory: backend
+Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+Recommended environment variables:
+
+```bash
+CORS_ORIGIN=https://your-frontend-domain.vercel.app
+DATABASE_URL=postgresql+asyncpg://...
+GROQ_API_KEY=gsk_...
+GROQ_MODEL=llama-3.1-8b-instant
+GROQ_FALLBACK_MODEL=llama-3.3-70b-versatile
+GROQ_MAX_RETRIES=3
+GROQ_RETRY_BASE_DELAY=2
+GROQ_MAX_CONCURRENCY=2
+CONTRACTS_YAML_PATH=contracts/example_contracts.yaml
+TRACE_RATE_LIMIT_MAX_REQUESTS=5
+TRACE_RATE_LIMIT_WINDOW_SECONDS=60
+```
+
+Notes:
+
+- `DATABASE_URL` is optional for first deploy because the app falls back to SQLite
+- `GROQ_API_KEY` is optional because semantic evaluation has a deterministic fallback
+- the current rate limiter is in-memory and per-process, which is appropriate for demos and single-instance deploys
+- for multi-instance production traffic, move rate limiting to Redis or your API gateway
+
+### Vercel Frontend
+
+Deploy `frontend/` and set:
+
+```bash
+VITE_API_URL=https://your-backend-domain.up.railway.app
+```
+
+The repo already includes SPA rewrites in [frontend/vercel.json](/c:/Eval-Driven%20LLM%20Pipeline%20Behavioral%20Contract%20System/llm-contracts/frontend/vercel.json).
 
 ## Tech Stack
 

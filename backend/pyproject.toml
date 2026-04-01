@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "llm-contracts"
 version = "0.2.0"
@@ -6,3 +10,6 @@ requires-python = ">=3.10"
 
 [project.scripts]
 llmtest = "app.cli:main"
+
+[tool.setuptools]
+packages = ["app"]

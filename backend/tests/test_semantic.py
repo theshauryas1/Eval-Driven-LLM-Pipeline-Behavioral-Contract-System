@@ -3,6 +3,7 @@ Unit tests for the semantic evaluator stub.
 Full LangGraph agent tests require GROQ_API_KEY — these test the stub behavior.
 """
 import pytest
+from app.evaluators import semantic
 from app.evaluators.semantic import SemanticEvaluator
 
 
@@ -56,3 +57,45 @@ class TestSemanticStub:
             retrieved_context="",
         )
         assert isinstance(result.passed, bool)
+
+    def test_groq_error_falls_back_to_deterministic_path(self, monkeypatch):
+        monkeypatch.setattr(semantic, "GROQ_AVAILABLE", True)
+
+        class BrokenGraph:
+            def invoke(self, _state):
+                raise RuntimeError("429 Too Many Requests")
+
+        evaluator = SemanticEvaluator()
+        evaluator._graph = BrokenGraph()
+
+        result = evaluator.evaluate(
+            contract_id="context_faithfulness",
+            config={},
+            output="The Eiffel Tower is located in London.",
+            retrieved_context="The Eiffel Tower is a famous landmark in Paris, France.",
+        )
+
+        assert result.reasoning_trace[0]["step"] == "groq_error"
+        assert isinstance(result.passed, bool)
+
+    def test_groq_cache_reuses_response(self, monkeypatch):
+        monkeypatch.setattr(semantic, "_groq_cache", {})
+        calls = {"count": 0}
+
+        class FakeResponse:
+            def __init__(self, content):
+                self.content = content
+
+        class FakeLLM:
+            def invoke(self, _messages):
+                calls["count"] += 1
+                return FakeResponse("NONE")
+
+        monkeypatch.setattr(semantic, "_make_llm", lambda model_name=None: FakeLLM())
+
+        first = semantic._invoke_with_resilience("prompt one")
+        second = semantic._invoke_with_resilience("prompt one")
+
+        assert first == "NONE"
+        assert second == "NONE"
+        assert calls["count"] == 1

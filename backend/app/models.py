@@ -15,11 +15,12 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    JSON,
     String,
     Text,
+    Uuid,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -31,7 +32,7 @@ class Trace(Base):
     __tablename__ = "traces"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     pipeline_id: Mapped[str] = mapped_column(String(255), index=True)
     input_text: Mapped[str] = mapped_column(Text)
@@ -62,7 +63,7 @@ class Contract(Base):
     id: Mapped[str] = mapped_column(String(255), primary_key=True)  # yaml id
     description: Mapped[str] = mapped_column(Text)
     type: Mapped[str] = mapped_column(String(50))
-    config_json: Mapped[dict] = mapped_column(JSONB, default=dict)
+    config_json: Mapped[dict] = mapped_column(JSON, default=dict)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -86,17 +87,17 @@ class EvalResult(Base):
     __tablename__ = "eval_results"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     trace_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("traces.id", ondelete="CASCADE"), index=True
+        Uuid(as_uuid=True), ForeignKey("traces.id", ondelete="CASCADE"), index=True
     )
     contract_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("contracts.id"), index=True
     )
     passed: Mapped[bool] = mapped_column(Boolean)
     explanation: Mapped[str] = mapped_column(Text, default="")
-    reasoning_trace: Mapped[list] = mapped_column(JSONB, default=list)
+    reasoning_trace: Mapped[list] = mapped_column(JSON, default=list)
     evaluated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

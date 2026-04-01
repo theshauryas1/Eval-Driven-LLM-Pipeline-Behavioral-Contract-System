@@ -5,11 +5,12 @@ GET /results/stats — pass rate time series for dashboard charts.
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select, and_
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -31,34 +32,37 @@ async def get_stats(
     Used by the React dashboard to render line charts.
     """
     since = datetime.now(tz=timezone.utc) - timedelta(days=days)
-
     rows = (
         await db.execute(
-            select(
-                func.date_trunc("day", DbEvalResult.evaluated_at).label("day"),
-                func.count().label("total"),
-                func.sum(func.cast(DbEvalResult.passed, type_=None)).label("passed"),
-            )
+            select(DbEvalResult.evaluated_at, DbEvalResult.passed)
             .where(
-                and_(
-                    DbEvalResult.contract_id == contract_id,
-                    DbEvalResult.evaluated_at >= since,
-                )
+                DbEvalResult.contract_id == contract_id,
+                DbEvalResult.evaluated_at >= since,
             )
-            .group_by("day")
-            .order_by("day")
+            .order_by(DbEvalResult.evaluated_at.asc())
         )
     ).all()
 
-    series = [
-        {
-            "date": row.day.date().isoformat() if row.day else None,
-            "total": row.total,
-            "passed": int(row.passed or 0),
-            "pass_rate": round(int(row.passed or 0) / row.total * 100, 1) if row.total else None,
-        }
-        for row in rows
-    ]
+    grouped: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "passed": 0})
+    for evaluated_at, passed in rows:
+        if evaluated_at is None:
+            continue
+        day = evaluated_at.date().isoformat()
+        grouped[day]["total"] += 1
+        grouped[day]["passed"] += int(bool(passed))
+
+    series = []
+    for day, counts in grouped.items():
+        total = counts["total"]
+        passed = counts["passed"]
+        series.append(
+            {
+                "date": day,
+                "total": total,
+                "passed": passed,
+                "pass_rate": round(passed / total * 100, 1) if total else None,
+            }
+        )
 
     return {"contract_id": contract_id, "days": days, "series": series}
 

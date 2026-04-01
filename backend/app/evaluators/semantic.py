@@ -8,8 +8,11 @@ test runs still produce meaningful failure diagnostics.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import threading
+import time
 from dataclasses import dataclass, field
 from typing import TypedDict
 
@@ -23,6 +26,8 @@ try:
 except ImportError:
     pass
 
+
+logger = logging.getLogger(__name__)
 
 TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9]+")
 SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?])\s+")
@@ -51,6 +56,16 @@ STOPWORDS = {
     "with",
 }
 
+DEFAULT_GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+DEFAULT_GROQ_FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "llama-3.3-70b-versatile")
+MAX_GROQ_RETRIES = max(1, int(os.getenv("GROQ_MAX_RETRIES", "3")))
+GROQ_BASE_DELAY_SECONDS = float(os.getenv("GROQ_RETRY_BASE_DELAY", "2"))
+GROQ_MAX_CONCURRENCY = max(1, int(os.getenv("GROQ_MAX_CONCURRENCY", "2")))
+
+_groq_gate = threading.BoundedSemaphore(GROQ_MAX_CONCURRENCY)
+_groq_cache: dict[tuple[str, str], str] = {}
+_groq_cache_lock = threading.Lock()
+
 
 @dataclass
 class EvalResult:
@@ -68,12 +83,74 @@ class AgentState(TypedDict):
     verdict: dict
 
 
-def _make_llm() -> "ChatGroq":
+def _make_llm(model_name: str | None = None) -> "ChatGroq":
     return ChatGroq(
-        model="llama-3.3-70b-versatile",
+        model=model_name or DEFAULT_GROQ_MODEL,
         temperature=0,
         api_key=os.getenv("GROQ_API_KEY"),
     )
+
+
+def _extract_retry_after_seconds(exc: Exception) -> float | None:
+    response = getattr(exc, "response", None)
+    if response is not None:
+        headers = getattr(response, "headers", {}) or {}
+        retry_after = headers.get("retry-after")
+        if retry_after:
+            try:
+                return max(float(retry_after), GROQ_BASE_DELAY_SECONDS)
+            except ValueError:
+                return None
+
+    text = str(exc)
+    match = re.search(r"retry-after[:= ]+(\d+(?:\.\d+)?)", text, re.IGNORECASE)
+    if match:
+        return max(float(match.group(1)), GROQ_BASE_DELAY_SECONDS)
+    return None
+
+
+def _is_retryable_rate_limit(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "429" in text or "rate limit" in text or "too many requests" in text
+
+
+def _invoke_with_resilience(prompt: str) -> str:
+    cache_key = (DEFAULT_GROQ_MODEL, prompt)
+    with _groq_cache_lock:
+        cached = _groq_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    errors: list[str] = []
+    models_to_try = [DEFAULT_GROQ_MODEL]
+    if DEFAULT_GROQ_FALLBACK_MODEL != DEFAULT_GROQ_MODEL:
+        models_to_try.append(DEFAULT_GROQ_FALLBACK_MODEL)
+
+    for model_name in models_to_try:
+        for attempt in range(1, MAX_GROQ_RETRIES + 1):
+            with _groq_gate:
+                try:
+                    logger.info(
+                        "Calling Groq semantic judge",
+                        extra={"model": model_name, "attempt": attempt},
+                    )
+                    response = _make_llm(model_name).invoke([HumanMessage(content=prompt)])
+                    content = response.content.strip()
+                    with _groq_cache_lock:
+                        _groq_cache[cache_key] = content
+                    return content
+                except Exception as exc:
+                    errors.append(f"{model_name}: {exc}")
+                    logger.warning(
+                        "Groq semantic judge call failed",
+                        extra={"model": model_name, "attempt": attempt, "error": str(exc)},
+                    )
+                    if not _is_retryable_rate_limit(exc) or attempt == MAX_GROQ_RETRIES:
+                        break
+                    delay = _extract_retry_after_seconds(exc) or (GROQ_BASE_DELAY_SECONDS * attempt)
+                    time.sleep(delay)
+
+    raise RuntimeError("Groq semantic evaluation failed after retries: " + " | ".join(errors))
 
 
 def _tokenize(text: str) -> set[str]:
@@ -188,7 +265,6 @@ def _run_fallback(output: str, context: str) -> tuple[list[str], list[dict], dic
 
 
 def extract_claims(state: AgentState) -> AgentState:
-    llm = _make_llm()
     prompt = (
         "You are a claim extractor. Given the following LLM-generated response, "
         "list every distinct factual claim, one per line. Do not include opinions, "
@@ -196,8 +272,7 @@ def extract_claims(state: AgentState) -> AgentState:
         f"Response:\n{state['output']}\n\n"
         "Output only the claims, one per line. If there are no factual claims, output NONE."
     )
-    result = llm.invoke([HumanMessage(content=prompt)])
-    raw = result.content.strip()
+    raw = _invoke_with_resilience(prompt)
     if raw.upper() == "NONE" or not raw:
         claims = []
     else:
@@ -211,7 +286,6 @@ def match_to_context(state: AgentState) -> AgentState:
         state["matched"] = []
         return state
 
-    llm = _make_llm()
     claims_str = "\n".join(f"- {claim}" for claim in state["claims"])
     prompt = (
         "You are a fact-checker. For each claim below, find the best matching sentence "
@@ -221,8 +295,7 @@ def match_to_context(state: AgentState) -> AgentState:
         "Output a JSON array where each element has "
         '{ "claim": "...", "best_match": "...", "similarity": "high|medium|low|none" }.'
     )
-    result = llm.invoke([HumanMessage(content=prompt)])
-    raw = result.content.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    raw = _invoke_with_resilience(prompt).removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     try:
         matched = json.loads(raw)
     except json.JSONDecodeError:
@@ -244,7 +317,6 @@ def flag_contradictions(state: AgentState) -> AgentState:
         }
         return state
 
-    llm = _make_llm()
     items_str = "\n".join(
         f"- Claim: \"{item['claim']}\" | Context match: \"{item.get('best_match', 'N/A')}\" | Similarity: {item.get('similarity')}"
         for item in low_support
@@ -256,8 +328,7 @@ def flag_contradictions(state: AgentState) -> AgentState:
         f"{items_str}\n\n"
         "Return JSON with keys passed, violations, and explanation."
     )
-    result = llm.invoke([HumanMessage(content=prompt)])
-    raw = result.content.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    raw = _invoke_with_resilience(prompt).removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     try:
         verdict = json.loads(raw)
     except json.JSONDecodeError:
@@ -300,7 +371,9 @@ class SemanticEvaluator:
         retrieved_context: str = "",
         **_kwargs,
     ) -> EvalResult:
-        if not GROQ_AVAILABLE or self._graph is None:
+        use_groq = GROQ_AVAILABLE and self._graph is not None and config.get("use_groq", True)
+
+        if not use_groq:
             claims, matched, verdict = _run_fallback(output, retrieved_context)
             reasoning_trace = [
                 {"step": "extract_claims", "result": claims},
@@ -321,16 +394,33 @@ class SemanticEvaluator:
             "matched": [],
             "verdict": {},
         }
-        final_state = self._graph.invoke(initial_state)
-        verdict = final_state.get("verdict", {})
-        reasoning_trace = [
-            {"step": "extract_claims", "result": final_state.get("claims", [])},
-            {"step": "match_to_context", "result": final_state.get("matched", [])},
-            {"step": "flag_contradictions", "result": verdict},
-        ]
-        return EvalResult(
-            contract_id=contract_id,
-            passed=verdict.get("passed", True),
-            explanation=verdict.get("explanation", ""),
-            reasoning_trace=reasoning_trace,
-        )
+
+        try:
+            final_state = self._graph.invoke(initial_state)
+            verdict = final_state.get("verdict", {})
+            reasoning_trace = [
+                {"step": "extract_claims", "result": final_state.get("claims", [])},
+                {"step": "match_to_context", "result": final_state.get("matched", [])},
+                {"step": "flag_contradictions", "result": verdict},
+            ]
+            return EvalResult(
+                contract_id=contract_id,
+                passed=verdict.get("passed", True),
+                explanation=verdict.get("explanation", ""),
+                reasoning_trace=reasoning_trace,
+            )
+        except Exception as exc:
+            logger.exception("Semantic Groq evaluation failed, falling back to deterministic evaluator")
+            claims, matched, verdict = _run_fallback(output, retrieved_context)
+            reasoning_trace = [
+                {"step": "groq_error", "result": str(exc)},
+                {"step": "extract_claims", "result": claims},
+                {"step": "match_to_context", "result": matched},
+                {"step": "flag_contradictions", "result": verdict},
+            ]
+            return EvalResult(
+                contract_id=contract_id,
+                passed=verdict.get("passed", True),
+                explanation=verdict.get("explanation", ""),
+                reasoning_trace=reasoning_trace,
+            )
