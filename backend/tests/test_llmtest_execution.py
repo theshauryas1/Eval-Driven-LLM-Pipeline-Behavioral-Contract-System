@@ -1,10 +1,18 @@
 from pathlib import Path
 
+import pytest
+
+from app.evaluators import semantic
 from app.llmtest.execution import ExecutionEngine
 from app.llmtest.loader import load_models, load_suites
 
 
 TESTS_DIR = Path(__file__).parents[2] / "tests"
+
+
+@pytest.fixture(autouse=True)
+def disable_live_groq_for_execution_tests(monkeypatch):
+    monkeypatch.setattr(semantic, "GROQ_AVAILABLE", False)
 
 
 def test_execution_engine_runs_all_suites_and_models():

@@ -19,6 +19,11 @@ from app.database import init_db, AsyncSessionLocal
 from app.api import api_router
 
 
+def _parse_cors_origins() -> list[str]:
+    raw = os.getenv("CORS_ORIGIN", "http://localhost:5173")
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── Startup ──────────────────────────────────────────────
@@ -63,11 +68,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-CORS_ORIGIN = os.getenv("CORS_ORIGIN", "http://localhost:5173")
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[CORS_ORIGIN, "https://shaurya-beta.vercel.app"],
+    allow_origins=_parse_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

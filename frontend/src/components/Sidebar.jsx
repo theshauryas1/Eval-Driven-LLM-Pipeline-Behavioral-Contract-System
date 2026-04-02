@@ -37,7 +37,7 @@ export default function Sidebar() {
             <div style={{ marginTop: 'auto', padding: '1rem 0.5rem 0' }}>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.6 }}>
                     <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--text-secondary)' }}>Stack</div>
-                    FastAPI · SQLite or Postgres · LangGraph · Groq
+                    FastAPI | SQLite or Postgres | LangGraph | Groq
                 </div>
             </div>
         </aside>

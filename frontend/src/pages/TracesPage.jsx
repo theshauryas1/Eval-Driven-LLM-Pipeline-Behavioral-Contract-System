@@ -11,7 +11,7 @@ function ReasoningTrace({ steps }) {
             </div>
             {steps.map((step, i) => (
                 <div key={i} className="trace-step">
-                    <div className="trace-step-title">Step {i + 1} — {step.step}</div>
+                    <div className="trace-step-title">Step {i + 1} | {step.step}</div>
                     <div className="code-block">
                         {typeof step.result === 'string'
                             ? step.result
@@ -54,7 +54,6 @@ function TraceInspectorModal({ traceId, onClose }) {
                         <div className="empty-state"><p>Failed to load trace detail.</p></div>
                     ) : (
                         <div>
-                            {/* Summary */}
                             <div className="grid-3" style={{ marginBottom: '1.25rem' }}>
                                 <div className="card" style={{ textAlign: 'center', padding: '0.75rem' }}>
                                     <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--green)' }}>{detail.summary.passed}</div>
@@ -70,7 +69,6 @@ function TraceInspectorModal({ traceId, onClose }) {
                                 </div>
                             </div>
 
-                            {/* Input / Context / Output */}
                             {[
                                 { label: 'Input', value: detail.trace.input_text },
                                 { label: 'Retrieved Context', value: detail.trace.retrieved_context },
@@ -82,7 +80,6 @@ function TraceInspectorModal({ traceId, onClose }) {
                                 </div>
                             ) : null)}
 
-                            {/* Per-contract results */}
                             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8, marginTop: 8 }}>
                                 Contract Results
                             </div>
@@ -137,20 +134,20 @@ export default function TracesPage() {
 
     const fmtDate = (iso) => iso
         ? new Date(iso).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })
-        : '—'
+        : '-'
 
     return (
         <div>
             <div className="page-header">
                 <h2>Trace Inspector</h2>
-                <p>Every LLM pipeline call — click any row to see per-contract verdicts and reasoning traces.</p>
+                <p>Every LLM pipeline call. Click any row to see per-contract verdicts and reasoning traces.</p>
             </div>
 
             <div className="card" style={{ marginBottom: '1.5rem', padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: 12 }}>
                 <label style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Pipeline ID</label>
                 <input
                     id="pipeline-filter"
-                    placeholder="Filter by pipeline_id…"
+                    placeholder="Filter by pipeline_id..."
                     value={pipelineFilter}
                     onChange={e => { setPipelineFilter(e.target.value); setPage(0) }}
                     style={{ width: 240 }}
@@ -221,13 +218,13 @@ export default function TracesPage() {
                 {total > LIMIT && (
                     <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid var(--border)', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                         <button className="btn btn-ghost" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}>
-                            ← Prev
+                            Prev
                         </button>
                         <span style={{ fontSize: 13, color: 'var(--text-muted)', padding: '0.5rem 0.5rem' }}>
                             {page + 1} / {Math.ceil(total / LIMIT)}
                         </span>
                         <button className="btn btn-ghost" onClick={() => setPage(p => p + 1)} disabled={(page + 1) * LIMIT >= total}>
-                            Next →
+                            Next
                         </button>
                     </div>
                 )}

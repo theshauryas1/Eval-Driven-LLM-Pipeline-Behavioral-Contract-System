@@ -99,3 +99,108 @@ class TestSemanticStub:
         assert first == "NONE"
         assert second == "NONE"
         assert calls["count"] == 1
+
+    def test_normalize_verdict_coerces_non_boolean_passed(self):
+        verdict = semantic._normalize_verdict(
+            {
+                "passed": [],
+                "violations": [{"claim": "Unsupported claim"}],
+                "explanation": "Unsupported.",
+            }
+        )
+
+        assert verdict["passed"] is False
+        assert verdict["violations"] == [{"claim": "Unsupported claim"}]
+        assert verdict["explanation"] == "Unsupported."
+
+    def test_groq_verdict_is_normalized_before_return(self, monkeypatch):
+        monkeypatch.setattr(semantic, "GROQ_AVAILABLE", True)
+
+        class FakeGraph:
+            def invoke(self, _state):
+                return {
+                    "claims": ["Acme offers phone support."],
+                    "matched": [{"claim": "Acme offers phone support.", "best_match": "", "similarity": "none"}],
+                    "verdict": {
+                        "passed": [],
+                        "violations": [{"claim": "Acme offers phone support."}],
+                        "explanation": "Not supported by context.",
+                    },
+                }
+
+        evaluator = SemanticEvaluator()
+        evaluator._graph = FakeGraph()
+
+        result = evaluator.evaluate(
+            contract_id="context_faithfulness",
+            config={"use_groq": True},
+            output="Acme offers phone support.",
+            retrieved_context="Support is available by email only.",
+        )
+
+        assert result.passed is False
+        assert result.reasoning_trace[-1]["result"]["passed"] is False
+
+    def test_match_to_context_uses_fallback_when_llm_returns_bad_matches(self, monkeypatch):
+        monkeypatch.setattr(
+            semantic,
+            "_invoke_with_resilience",
+            lambda _prompt: '[{"claim":"Support is available Monday through Friday.","best_match":"","similarity":"none"}]',
+        )
+
+        state = {
+            "output": "Support is available Monday through Friday.",
+            "context": "Support is available Monday through Friday from 9 AM to 5 PM IST.",
+            "claims": ["Support is available Monday through Friday."],
+            "matched": [],
+            "verdict": {},
+        }
+
+        result = semantic.match_to_context(state)
+
+        assert result["matched"][0]["similarity"] in {"high", "medium"}
+        assert result["matched"][0]["best_match"]
+
+    def test_fallback_matching_produces_supported_verdict_for_grounded_claims(self):
+        claims = ["Support is available Monday through Friday."]
+        matched = semantic._fallback_match_claims(
+            claims,
+            "Support is available Monday through Friday from 9 AM to 5 PM IST.",
+        )
+        verdict = semantic._build_verdict_from_matches(
+            claims,
+            matched,
+            "Support is available Monday through Friday from 9 AM to 5 PM IST.",
+        )
+
+        assert matched[0]["similarity"] in {"high", "medium"}
+        assert verdict["passed"] is True
+
+    def test_normalize_claims_filters_inferred_claims_not_stated_in_output(self):
+        claims = [
+            "Support is available Monday through Friday.",
+            "IST is a time zone.",
+        ]
+
+        normalized = semantic._normalize_claims(
+            claims,
+            "Support is available Monday through Friday from 9 AM to 5 PM IST.",
+        )
+
+        assert "Support is available Monday through Friday." in normalized
+        assert "IST is a time zone." not in normalized
+
+    def test_normalize_verdict_replaces_non_informative_violations(self):
+        verdict = semantic._normalize_verdict(
+            {
+                "passed": False,
+                "violations": [2],
+                "explanation": "2 claim(s) not grounded in context.",
+            },
+            low_support=[
+                {"claim": "Claim one", "similarity": "none"},
+                {"claim": "Claim two", "similarity": "low"},
+            ],
+        )
+
+        assert verdict["violations"] == ["Claim one", "Claim two"]

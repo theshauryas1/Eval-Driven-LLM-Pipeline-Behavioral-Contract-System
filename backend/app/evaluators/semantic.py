@@ -211,6 +211,12 @@ def _label_similarity(score: float) -> str:
 
 def _run_fallback(output: str, context: str) -> tuple[list[str], list[dict], dict]:
     claims = _extract_claims_fallback(output)
+    matched = _fallback_match_claims(claims, context)
+    verdict = _build_verdict_from_matches(claims, matched, context)
+    return claims, matched, verdict
+
+
+def _fallback_match_claims(claims: list[str], context: str) -> list[dict]:
     context_sentences = _split_sentences(context)
     matched: list[dict] = []
 
@@ -231,6 +237,16 @@ def _run_fallback(output: str, context: str) -> tuple[list[str], list[dict], dic
                 "score": round(best_score, 2),
             }
         )
+
+    return matched
+
+
+def _build_verdict_from_matches(
+    claims: list[str],
+    matched: list[dict],
+    context: str,
+) -> dict:
+    context_sentences = _split_sentences(context)
 
     low_support = [item for item in matched if item["similarity"] in {"low", "none"}]
     if not claims:
@@ -261,7 +277,152 @@ def _run_fallback(output: str, context: str) -> tuple[list[str], list[dict], dic
             "explanation": f"{len(low_support)} unsupported claim(s) detected.",
         }
 
-    return claims, matched, verdict
+    return verdict
+
+
+def _coerce_passed(value: object, violations: list[object]) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "pass", "passed", "yes"}:
+            return True
+        if normalized in {"false", "fail", "failed", "no"}:
+            return False
+    if isinstance(value, list):
+        return len(value) == 0 and len(violations) == 0
+    if value is None:
+        return len(violations) == 0
+    return bool(value)
+
+
+def _normalize_violations(value: object) -> list[object]:
+    if isinstance(value, list):
+        return value
+    if value in (None, "", False):
+        return []
+    return [value]
+
+
+def _normalize_verdict(verdict: object, low_support: list[dict] | None = None) -> dict:
+    fallback_explanation = (
+        f"{len(low_support or [])} claim(s) not grounded in context."
+        if low_support is not None
+        else "Semantic evaluation returned an invalid verdict."
+    )
+    fallback_violations = [item["claim"] for item in (low_support or [])]
+
+    if not isinstance(verdict, dict):
+        return {
+            "passed": len(fallback_violations) == 0,
+            "violations": fallback_violations,
+            "explanation": fallback_explanation,
+        }
+
+    violations = _normalize_violations(verdict.get("violations"))
+    if low_support is not None and (
+        not violations
+        or any(not isinstance(item, (str, dict)) for item in violations)
+    ):
+        violations = fallback_violations
+    explanation = verdict.get("explanation")
+    if not isinstance(explanation, str) or not explanation.strip():
+        explanation = fallback_explanation
+
+    return {
+        "passed": _coerce_passed(verdict.get("passed"), violations),
+        "violations": violations,
+        "explanation": explanation,
+    }
+
+
+def _normalize_match_item(item: object, claim: str) -> dict:
+    if not isinstance(item, dict):
+        return {"claim": claim, "best_match": "", "similarity": "none"}
+
+    similarity = str(item.get("similarity", "none")).strip().lower()
+    if similarity not in {"high", "medium", "low", "none"}:
+        similarity = "none"
+
+    best_match = item.get("best_match", "")
+    if not isinstance(best_match, str):
+        best_match = ""
+
+    item_claim = item.get("claim")
+    if not isinstance(item_claim, str) or not item_claim.strip():
+        item_claim = claim
+
+    normalized = {
+        "claim": item_claim,
+        "best_match": best_match,
+        "similarity": similarity,
+    }
+
+    score = item.get("score")
+    if isinstance(score, (int, float)):
+        normalized["score"] = round(float(score), 2)
+    return normalized
+
+
+def _claim_is_grounded_in_output(claim: str, output: str) -> bool:
+    output_sentences = _split_sentences(output)
+    if not output_sentences:
+        return False
+    best_score = max(_similarity_score(claim, sentence) for sentence in output_sentences)
+    return best_score >= 0.5
+
+
+def _normalize_claims(claims: list[str], output: str) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for claim in claims:
+        if not isinstance(claim, str):
+            continue
+        cleaned = claim.strip()
+        if not cleaned:
+            continue
+        key = cleaned.lower()
+        if key in seen:
+            continue
+        if not _claim_is_grounded_in_output(cleaned, output):
+            continue
+        seen.add(key)
+        normalized.append(cleaned)
+    return normalized
+
+
+def _normalize_matched(claims: list[str], matched: object) -> list[dict]:
+    if not isinstance(matched, list) or len(matched) != len(claims):
+        return [
+            {"claim": claim, "best_match": "", "similarity": "none"}
+            for claim in claims
+        ]
+
+    return [
+        _normalize_match_item(item, claim)
+        for claim, item in zip(claims, matched)
+    ]
+
+
+def _should_replace_with_fallback(claims: list[str], matched: list[dict], fallback_matched: list[dict]) -> bool:
+    if len(matched) != len(claims):
+        return True
+
+    llm_supported = sum(1 for item in matched if item["similarity"] in {"high", "medium"})
+    fallback_supported = sum(
+        1 for item in fallback_matched if item["similarity"] in {"high", "medium"}
+    )
+
+    if fallback_supported > llm_supported:
+        return True
+
+    for item, fallback_item in zip(matched, fallback_matched):
+        if item["similarity"] == "none" and fallback_item["similarity"] in {"high", "medium"}:
+            return True
+
+    return False
 
 
 def extract_claims(state: AgentState) -> AgentState:
@@ -277,7 +438,11 @@ def extract_claims(state: AgentState) -> AgentState:
         claims = []
     else:
         claims = [line.lstrip("-* ").strip() for line in raw.splitlines() if line.strip()]
-    state["claims"] = claims
+    fallback_claims = _extract_claims_fallback(state["output"])
+    normalized_claims = _normalize_claims(claims, state["output"])
+    if not normalized_claims:
+        normalized_claims = fallback_claims
+    state["claims"] = normalized_claims
     return state
 
 
@@ -299,11 +464,15 @@ def match_to_context(state: AgentState) -> AgentState:
     try:
         matched = json.loads(raw)
     except json.JSONDecodeError:
-        matched = [
-            {"claim": claim, "best_match": "", "similarity": "none"}
-            for claim in state["claims"]
-        ]
-    state["matched"] = matched
+        matched = []
+
+    normalized_matched = _normalize_matched(state["claims"], matched)
+    fallback_matched = _fallback_match_claims(state["claims"], state["context"])
+
+    if _should_replace_with_fallback(state["claims"], normalized_matched, fallback_matched):
+        state["matched"] = fallback_matched
+    else:
+        state["matched"] = normalized_matched
     return state
 
 
@@ -337,7 +506,7 @@ def flag_contradictions(state: AgentState) -> AgentState:
             "violations": [item["claim"] for item in low_support],
             "explanation": f"{len(low_support)} claim(s) not grounded in context.",
         }
-    state["verdict"] = verdict
+    state["verdict"] = _normalize_verdict(verdict, low_support=low_support)
     return state
 
 
@@ -375,6 +544,7 @@ class SemanticEvaluator:
 
         if not use_groq:
             claims, matched, verdict = _run_fallback(output, retrieved_context)
+            verdict = _normalize_verdict(verdict)
             reasoning_trace = [
                 {"step": "extract_claims", "result": claims},
                 {"step": "match_to_context", "result": matched},
@@ -397,7 +567,7 @@ class SemanticEvaluator:
 
         try:
             final_state = self._graph.invoke(initial_state)
-            verdict = final_state.get("verdict", {})
+            verdict = _normalize_verdict(final_state.get("verdict", {}))
             reasoning_trace = [
                 {"step": "extract_claims", "result": final_state.get("claims", [])},
                 {"step": "match_to_context", "result": final_state.get("matched", [])},
@@ -412,6 +582,7 @@ class SemanticEvaluator:
         except Exception as exc:
             logger.exception("Semantic Groq evaluation failed, falling back to deterministic evaluator")
             claims, matched, verdict = _run_fallback(output, retrieved_context)
+            verdict = _normalize_verdict(verdict)
             reasoning_trace = [
                 {"step": "groq_error", "result": str(exc)},
                 {"step": "extract_claims", "result": claims},

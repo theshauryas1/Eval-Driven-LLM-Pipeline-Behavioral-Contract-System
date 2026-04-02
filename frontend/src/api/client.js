@@ -23,5 +23,10 @@ export const api = {
         req(`/results/stats?contract_id=${contractId}&days=${days}`),
     postTrace: (payload) =>
         req('/trace', { method: 'POST', body: JSON.stringify(payload) }),
+    runDemo: (scenario = 'hallucination') =>
+        req('/trace/demo', {
+            method: 'POST',
+            body: JSON.stringify({ scenario }),
+        }),
     health: () => req('/health'),
 }

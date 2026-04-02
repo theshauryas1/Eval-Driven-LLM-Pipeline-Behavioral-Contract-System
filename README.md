@@ -16,7 +16,7 @@ Most LLM apps fail silently. This system makes failures explicit by checking eve
 ## Demo
 
 - API demo endpoint: `POST /trace/demo`
-- Frontend dashboard: deploy the Vite app and point `VITE_API_URL` at the backend
+- Frontend dashboard: deploy the Vite app on Vercel and point `VITE_API_URL` at the Render backend
 - Suggested live flow: run the demo endpoint, then open the Trace Inspector to show the failed contracts and reasoning trace
 
 ## Product Promise
@@ -227,9 +227,9 @@ pytest tests -v
 
 ## Deployment
 
-### Railway Backend
+### Render Backend
 
-The repo already includes Railway config in [backend/railway.json](/c:/Eval-Driven%20LLM%20Pipeline%20Behavioral%20Contract%20System/llm-contracts/backend/railway.json).
+The repo already includes Render config in [render.yaml](/c:/Eval-Driven%20LLM%20Pipeline%20Behavioral%20Contract%20System/llm-contracts/render.yaml). A legacy Railway config still exists in [backend/railway.json](/c:/Eval-Driven%20LLM%20Pipeline%20Behavioral%20Contract%20System/llm-contracts/backend/railway.json), but Render is the current backend target.
 
 Use these settings:
 
@@ -241,8 +241,8 @@ Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
 Recommended environment variables:
 
 ```bash
-CORS_ORIGIN=https://your-frontend-domain.vercel.app
-DATABASE_URL=postgresql+asyncpg://...
+CORS_ORIGIN=https://your-frontend-domain.vercel.app,https://your-preview-domain.vercel.app
+DATABASE_URL=postgresql+asyncpg://user:password@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require
 GROQ_API_KEY=gsk_...
 GROQ_MODEL=llama-3.1-8b-instant
 GROQ_FALLBACK_MODEL=llama-3.3-70b-versatile
@@ -266,10 +266,14 @@ Notes:
 Deploy `frontend/` and set:
 
 ```bash
-VITE_API_URL=https://your-backend-domain.up.railway.app
+VITE_API_URL=https://your-backend-name.onrender.com
 ```
 
 The repo already includes SPA rewrites in [frontend/vercel.json](/c:/Eval-Driven%20LLM%20Pipeline%20Behavioral%20Contract%20System/llm-contracts/frontend/vercel.json).
+
+### Neon Database
+
+Create a Neon Postgres database and paste its pooled `postgresql+asyncpg://...?...sslmode=require` connection string into Render as `DATABASE_URL`.
 
 ## Tech Stack
 

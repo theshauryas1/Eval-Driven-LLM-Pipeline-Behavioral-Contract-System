@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import {
     LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
-    CartesianGrid, ReferenceLine, Legend
+    CartesianGrid, ReferenceLine
 } from 'recharts'
 import { TrendingDown, AlertCircle } from 'lucide-react'
 
@@ -18,7 +18,7 @@ const CustomTooltip = ({ active, payload, label }) => {
             fontSize: 12,
         }}>
             <div style={{ fontWeight: 600, marginBottom: 4 }}>{label}</div>
-            <div style={{ color: 'var(--accent-light)' }}>Pass rate: {d.pass_rate !== null ? `${d.pass_rate}%` : '—'}</div>
+            <div style={{ color: 'var(--accent-light)' }}>Pass rate: {d.pass_rate !== null ? `${d.pass_rate}%` : '-'}</div>
             <div style={{ color: 'var(--text-muted)' }}>Evals: {d.total} ({d.passed} passed)</div>
         </div>
     )
@@ -46,16 +46,14 @@ export default function RegressionPage() {
             .catch(() => setLoading(false))
     }, [selectedId, days])
 
-    // Find the first day pass_rate dropped below 90
     const firstFail = series.find(d => d.pass_rate !== null && d.pass_rate < 90)
-
     const selected = contracts.find(c => c.id === selectedId)
 
     return (
         <div>
             <div className="page-header">
                 <h2>Regression View</h2>
-                <p>Detect when a contract started failing — historical pass rates with first-failure marker.</p>
+                <p>Detect when a contract started failing with historical pass rates and a first-failure marker.</p>
             </div>
 
             <div className="card" style={{ marginBottom: '1.5rem', padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
@@ -98,7 +96,7 @@ export default function RegressionPage() {
                 }}>
                     <AlertCircle size={16} color="var(--red)" />
                     <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>
-                        <strong style={{ color: 'var(--red)' }}>Regression detected</strong> —{' '}
+                        <strong style={{ color: 'var(--red)' }}>Regression detected</strong>{' '}
                         <strong>{selectedId}</strong> first failed on <strong>{firstFail.date}</strong> with a pass rate of{' '}
                         <strong style={{ color: 'var(--red)' }}>{firstFail.pass_rate}%</strong>.
                     </span>
@@ -107,10 +105,10 @@ export default function RegressionPage() {
 
             <div className="card">
                 <div className="card-header">
-                    <span className="card-title">Pass Rate Over Time — {selectedId}</span>
+                    <span className="card-title">Pass Rate Over Time | {selectedId}</span>
                     <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text-muted)' }}>
-                        <span style={{ color: 'var(--green)' }}>━━ Healthy (&ge;90%)</span>
-                        <span style={{ color: 'var(--red)' }}>━━ Failing (&lt;90%)</span>
+                        <span style={{ color: 'var(--green)' }}>Healthy (&ge;90%)</span>
+                        <span style={{ color: 'var(--red)' }}>Failing (&lt;90%)</span>
                     </div>
                 </div>
 
